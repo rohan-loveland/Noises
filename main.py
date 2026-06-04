@@ -55,6 +55,6 @@ def display_random_spectrogram(data_dir: str, n_mels: int = 128, fmax: int = 160
 # ============== Usage ==============
 if __name__ == "__main__":
     # <<< CHANGE THIS TO YOUR DIRECTORY >>>
-    DATA_DIR = "data/train_audio"  # or "/path/to/your/birdclef/train_audio"
+    DATA_DIR = "Data/train_audio"  # or "/path/to/your/birdclef/train_audio"
 
     display_random_spectrogram(DATA_DIR)
