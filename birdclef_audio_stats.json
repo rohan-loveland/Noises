@@ -1,0 +1,41 @@
+{
+  "total_files": 35549,
+  "total_hours": 344.4558444618056,
+  "avg_duration": 34.88258572850151,
+  "min_duration": 0.008,
+  "max_duration": 6881.097,
+  "avg_size_mb": 0.28851971546739574,
+  "total_size_mb": 10256.587365150452,
+  "per_class": {
+    "Insecta": {
+      "count": 199,
+      "avg_duration": 29.22333103015075,
+      "min_duration": 0.096,
+      "max_duration": 143.26
+    },
+    "Reptilia": {
+      "count": 1,
+      "avg_duration": 7.86284375,
+      "min_duration": 7.86284375,
+      "max_duration": 7.86284375
+    },
+    "Amphibia": {
+      "count": 451,
+      "avg_duration": 27.26044491407982,
+      "min_duration": 0.03484375,
+      "max_duration": 250.3575625
+    },
+    "Mammalia": {
+      "count": 99,
+      "avg_duration": 38.086092171717176,
+      "min_duration": 0.0870625,
+      "max_duration": 318.66775
+    },
+    "Aves": {
+      "count": 34799,
+      "avg_duration": 35.00539528614328,
+      "min_duration": 0.008,
+      "max_duration": 6881.097
+    }
+  }
+}
