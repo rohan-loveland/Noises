@@ -92,7 +92,7 @@ def main():
     parser.add_argument('--no_save_audio', action='store_true',
                         help='Only create metadata, do not save .ogg files')
     parser.add_argument('--overlap', type=float, default=0.5,
-                        help='Overlap fraction (0.5 = 50% overlap)')
+                        help='Overlap fraction (0.5 = 50 percent overlap)')
     args = parser.parse_args()
 
     # ========================= CONFIGURATION =========================
