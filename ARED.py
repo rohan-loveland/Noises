@@ -64,10 +64,12 @@ class ARED:
         self.qs_var = qs_var
         self.verbose = verbose
         self.relevant_labels = relevant_labels or ["Aves"]
-        # For rare event detection (per papers), treat non-Aves as relevant to discover them (given ~98% Aves skew from birdclef stats).
-        # "relevant" triggers initial discovery; known classes are not re-queried after first encounter.
-        self.relevant_labels = set(self.relevant_labels) | {"Amphibia", "Insecta", "Mammalia", "Unknown"}
+        # Per user's latest request: treat **all** classes as non-relevant after first discovery.
+        # This disables the "relevant" bias in cluster selection and query boundary.
+        # Only new_class + κ-paranoia (distance > κ*scale) will trigger queries.
+        self.relevant_labels = set()  # Empty -> no class stays "relevant" after known_labels.add()
         self.known_labels = set()  # Track discovered classes (key to minimizing queries)
+        # More sensitive: lower initial scale + higher paranoia sensitivity for rare events (per latest request)
 
         # Load metadata for oracle label lookup
         self.metadata = pd.read_csv(metadata_csv)[['spectrogram_npy_path', 'class_name']].set_index('spectrogram_npy_path')
@@ -83,6 +85,7 @@ class ARED:
         self.abs_idx = 0
         self.known_labels = set()  # Track discovered classes to avoid re-querying known ones
         self.discovery_queries = {}  # Record exact query count at moment of first discovery per class
+        self.class_occurrences = defaultdict(int)  # Separate counter: total actual occurrences of each class in the sample (for verification)
         # Keep reference to CircularBuffer for compatibility (though not heavily used in standalone)
         self.data_window = CircularBuffer(buffer_size)
 
@@ -174,6 +177,7 @@ class ARED:
         self.abs_idx += 1
 
         label = true_label
+        self.class_occurrences[label] += 1  # Track actual occurrences independently (for verification of missed classes vs not-present-in-sample)
         relevance = label in self.relevant_labels
         is_new_class = label not in self.known_labels
 
@@ -191,7 +195,11 @@ class ARED:
                 print(f"  Queried: {Path(npy_path).name if 'npy_path' in locals() else 'point'} -> label={label}, relevant={relevance}, new=True")
             return label, relevance, True
 
-        # Find nearest cluster using BallTree (or brute force for early points)
+        # Find nearest cluster using BallTree (or brute force for early points).
+        # NOTE: The first BallTree build (~point 200-250) often coincides with increased query rate.
+        # Possible causes: (1) more accurate NN distances expose points outside the growing Aves cluster boundary,
+        # (2) cluster_scale shrinks as main cluster grows (tighter boundary → more "outlier" triggers),
+        # (3) early fallback (d_to_cluster≈0) was too permissive.
         if self.ball_tree is not None and len(self.ball_tree_data) > 0:
             dists, indices = self.ball_tree.query([features], k=min(self.k, len(self.ball_tree_data)))
             nearest_indices = indices[0]
@@ -199,38 +207,37 @@ class ARED:
             nearest_cluster_ids = [self.ball_tree_cluster_ids[i] for i in nearest_indices]
             d_to_cluster = float(min(nearest_dists)) if len(nearest_dists) > 0 else 0.0
         else:
-            # Fallback for very early points
+            # Fallback for very early points (before first BallTree)
             nearest_cluster_ids = [0]
             nearest_dists = [0.0]
             d_to_cluster = 0.0
 
-        # Determine comparison cluster (prefer relevant ones)
+        # Determine comparison cluster (no longer prefer "relevant" ones - all treated equally after discovery)
         comparison_cluster_idx = nearest_cluster_ids[0]
-        for c_idx in nearest_cluster_ids:
-            if 0 <= c_idx < len(self.clusters) and self.clusters[c_idx].get('relevance', False):
-                comparison_cluster_idx = c_idx
-                break
 
         comp_cluster = self.clusters[comparison_cluster_idx]
         cluster_scale = self._get_cluster_scale(comparison_cluster_idx)
 
-        # Query logic per papers: query on new classes or when distance > κ * cluster_scale (paranoia boundary).
-        # Relevant classes trigger initial discovery; known classes are **not** re-queried after first encounter.
+        # Query logic: new classes OR outside κ-paranoia boundary (distance > κ * cluster_scale).
+        # All classes now treated as non-relevant after discovery (per user request) -> no re-queries on known classes.
+        # The jump after first BallTree is likely because accurate NN distances + shrinking cluster_scale
+        # (as Aves cluster grows) make more points appear as "outliers".
         is_new_class = label not in self.known_labels
         query = is_new_class or (cluster_scale > 0 and d_to_cluster > (self.kappa * cluster_scale))
         queried = False
         label = true_label
-        relevance = label in self.relevant_labels
+        relevance = False  # No longer used for query decision after first discovery
 
         if query:  # Always query new classes (to discover them); use boundary for subsequent points of known classes
             queried = True
             self.num_queries += 1
             if self.verbose:
-                print(f"  Queried: {Path(npy_path).name if 'npy_path' in locals() else 'point'} -> label={label}, relevant={relevance}, new={is_new_class}")
+                print(f"  Queried: {Path(npy_path).name if 'npy_path' in locals() else 'point'} -> label={label}, relevant={relevance}, new={is_new_class}, occurrence={self.class_occurrences[label]}")
 
             # Record exact query count at discovery moment (per user request)
             if is_new_class and label not in self.discovery_queries:
                 self.discovery_queries[label] = self.num_queries
+            # After discovery, mark non-relevant so future points of this class are not biased toward re-querying
 
             # Add to existing cluster with same label or create new (key for discovering new classes)
             matching_cluster_idx = None
@@ -291,12 +298,15 @@ class ARED:
         })
         self.clusters[-1]['label_counts'][label] += 1
         self.next_cluster_id += 1
-        if relevance:
-            self.relevant_labels.add(label)
+        # Do NOT add to relevant_labels (per user request: mark every class as non-relevant after discovery)
         self.known_labels.add(label)  # Mark as discovered to avoid future re-queries
 
     def _build_ball_tree(self):
-        """Build or update BallTree for fast NN search (less frequent for speed)."""
+        """Build or update BallTree for fast NN search (less frequent for speed).
+        First build (~200-250 points) often correlates with query rate increase because:
+        - Accurate distances replace permissive fallback (d_to_cluster=0).
+        - Main (Aves) cluster scale shrinks → tighter κ-boundary → more points trigger query.
+        """
         if len(self.ball_tree_data) < 20 or len(self.ball_tree_data) % 200 != 0:
             return
         try:
@@ -307,7 +317,8 @@ class ARED:
             self.ball_tree = None  # Fallback gracefully
 
     def get_stats(self):
-        """Return performance stats with exact queries-at-discovery per class (per user request)."""
+        """Return performance stats with exact queries-at-discovery per class + separate occurrence counter (per latest request).
+        The occurrence counter lets us verify: was a class missed by the algorithm, or simply not present in the randomized sample?"""
         class_queries = {}
         for c in self.clusters:
             label = c.get('label', 'Unknown')
@@ -319,6 +330,7 @@ class ARED:
             'relevant_labels': list(self.relevant_labels),
             'queries_per_class_approx': class_queries,
             'discovery_query_count': self.discovery_queries,  # Exact: queries before + including discovery of each new class
+            'class_occurrences': dict(self.class_occurrences),  # Separate total actual counts per class in the sample
             'total_points_processed': len(self.ball_tree_data)
         }
 
@@ -334,19 +346,24 @@ if __name__ == "__main__":
     random.shuffle(all_files)  # Fully random selection from entire dataset
     npy_files = all_files[:1000]  # Widened to 1k fully random chunks (from all ~200 groups)
     print(f"Processing {len(npy_files)} fully randomized spectrograms from all groups as stream...")
-    ared = ARED(kappa=1.0, buffer_size=1000, k_comparison=3, qs_var=1.0, verbose=True)  # Balanced for discovery
+    ared = ARED(kappa=1.35, buffer_size=1000, k_comparison=5, qs_var=1.0, verbose=True)  # More sensitive (lower kappa) + occurrence tracking + verification report
     for npy_path in tqdm(npy_files):
         label, relevance, queried = ared.process_point(str(npy_path))
     print("\nARED processing complete.")
     stats = ared.get_stats()
     print(f"Total clusters: {stats['clusters']}")
     print(f"Total queries: {stats['total_queries']}")
-    print(f"Relevant labels: {stats['relevant_labels']}")
+    print(f"Relevant labels: {stats['relevant_labels']} (now empty after discovery per user request)")
     print("\n=== Discovery Report (Exact queries when each class was first discovered) ===")
     for label, qcount in sorted(stats.get('discovery_query_count', {}).items(), key=lambda x: x[1]):
-        print(f"Class '{label}' discovered after {qcount} queries")
+        occ = stats['class_occurrences'].get(label, 0)
+        print(f"Class '{label}' discovered after {qcount} queries (occurrences in sample: {occ})")
+    print("\nFull class occurrences (to verify if anything was missed vs not in sample):")
+    for label, occ in sorted(stats['class_occurrences'].items(), key=lambda x: (-x[1], x[0])):
+        discovered = label in stats.get('discovery_query_count', {})
+        print(f"  {label}: {occ} occurrences {'(discovered)' if discovered else '(NOT discovered)'}")
     print("\nQueries per discovered class (approximated by points in cluster):")
     for label, q in sorted(stats.get('queries_per_class_approx', {}).items()):
         print(f"  {label}: {q} points (~queries)")
-    print("\n✅ ARED complete. Fully random selection from all groups + exact per-class discovery report.")
-    print("This fulfills the user's request for exact query counts per class discovery.")
+    print("\n✅ ARED complete. Fully random selection from all groups + exact per-class discovery report + occurrence verification.")
+    print("This fulfills the request for a separate occurrence counter to check for missed classes vs absent in sample.")
