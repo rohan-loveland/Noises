@@ -65,11 +65,11 @@ class SpectrogramDataStream:
         data_point = spec.flatten()
         
         # L2 normalization (unit vector) - critical for high-dim data
-        norm = np.linalg.norm(data_point)
-        if norm > 0:
-            data_point = data_point / norm
-        else:
-            print("  WARNING: Zero-norm spectrogram encountered")
+        #norm = np.linalg.norm(data_point)
+        #if norm > 0:
+        #    data_point = data_point / norm
+        #else:
+        #    print("  WARNING: Zero-norm spectrogram encountered")
         
         self.stream_counter += 1
         return data_point
