@@ -38,7 +38,7 @@ class SpectrogramDataStream:
         npy_rel_path = row['spectrogram_npy_path']
         npy_path = self.tensor_dir / npy_rel_path
         
-        print(f"Examining spectrogram: {npy_rel_path} (counter={self.stream_counter})")  # Debug: show which file is being processed
+        #print(f"Examining spectrogram: {npy_rel_path} (counter={self.stream_counter})")  # Debug: show which file is being processed
         
         if not npy_path.exists():
             print(f"  WARNING: File not found - {npy_path}")

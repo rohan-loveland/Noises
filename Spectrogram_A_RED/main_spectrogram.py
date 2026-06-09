@@ -23,13 +23,13 @@ from Stats import Stats
 # ====================== CONFIG ======================
 # A_RED Parameters (tuned for high-dim spectrogram data ~40k dims)
 KAPPA = 2                    # Low value ensures few anomalies (most points join via add_o_pt or add_l_pt); near-zero queries after initial points
-DATA_WINDOW_SIZE = 2000        # Smaller memory bound for spectrogram streaming (faster forgetting of old points)
+DATA_WINDOW_SIZE = 500        # Smaller memory bound for spectrogram streaming (faster forgetting of old points)
 K_COMP_CLUST = 5               # More clusters for comparison in high-variance audio data
 QS_VAR = 0                     # Diameter (stable with our 0.1 floor fix)
 REL_PROC_VAR = 0               # Disabled: avoids extra queries on o_pts during relevance_processing for new non-bird classes
-VERBOSE_FLAGS = [0, 1, 2]      # 0=summary, 1=add_o_pt prints (confirms non-query path), 2=anomalous checks
+VERBOSE_FLAGS = []      # 0=summary, 1=add_o_pt prints (confirms non-query path), 2=anomalous checks
 
-NUM_POINTS_TO_PROCESS = 10000     # Minimal for quick verification run (npy loads + BallTree are heavy); demonstrates algorithm with low queries
+NUM_POINTS_TO_PROCESS = 15000     # Minimal for quick verification run (npy loads + BallTree are heavy); demonstrates algorithm with low queries
 N_REL_CLASSES = 5              # Target number of relevant classes to discover (for reporting)
 
 def main():
@@ -44,7 +44,7 @@ def main():
         tensor_dir="5sSpectrograms_tensors",
         max_samples=NUM_POINTS_TO_PROCESS if NUM_POINTS_TO_PROCESS > 0 else None,
         shuffle=True,  # Deterministic order for reproducible test
-        seed=42
+        seed=69
     )
     
     # Oracle knows true labels but only reveals on query (simulates human-in-loop)
