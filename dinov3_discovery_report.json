@@ -1,0 +1,35 @@
+{
+  "total_classes_seen": 3,
+  "total_classes_queried": 3,
+  "total_points_examined": 500,
+  "total_queries": 132,
+  "classes": {
+    "Amphibia": {
+      "first_seen_query_num": 80,
+      "first_seen_stream_idx": 79,
+      "first_queried_query_num": 54,
+      "first_queried_stream_idx": 79,
+      "queries_before_first_query": -26,
+      "first_seen_timestamp": "2026-06-09T15:14:42.644343",
+      "first_queried_timestamp": "2026-06-09T15:14:42.658282"
+    },
+    "Aves": {
+      "first_seen_query_num": 1,
+      "first_seen_stream_idx": 0,
+      "first_queried_query_num": 1,
+      "first_queried_stream_idx": 0,
+      "queries_before_first_query": 0,
+      "first_seen_timestamp": "2026-06-09T15:14:41.335730",
+      "first_queried_timestamp": "2026-06-09T15:14:41.558506"
+    },
+    "Mammalia": {
+      "first_seen_query_num": 10,
+      "first_seen_stream_idx": 9,
+      "first_queried_query_num": 10,
+      "first_queried_stream_idx": 9,
+      "queries_before_first_query": 0,
+      "first_seen_timestamp": "2026-06-09T15:14:41.667831",
+      "first_queried_timestamp": "2026-06-09T15:14:41.679435"
+    }
+  }
+}

@@ -16,20 +16,20 @@ from collections import Counter
 sys.path.insert(0, str(Path(__file__).parent.parent / "A_REDimplementation" / "A_RED"))
 sys.path.insert(0, str(Path(__file__).parent))
 
-from SpectrogramDataStream import SpectrogramDataStream, SpectrogramOracle
+from SpectrogramDataStream import SpectrogramDataStream, SpectrogramOracle, DiscoveryTracker
 from A_RED import ARED
 from Stats import Stats
 
 # ====================== CONFIG ======================
 # A_RED Parameters (tuned for high-dim spectrogram data ~40k dims)
-KAPPA = 2                    # Low value ensures few anomalies (most points join via add_o_pt or add_l_pt); near-zero queries after initial points
+KAPPA = 3                    # Low value ensures few anomalies (most points join via add_o_pt or add_l_pt); near-zero queries after initial points
 DATA_WINDOW_SIZE = 500        # Smaller memory bound for spectrogram streaming (faster forgetting of old points)
 K_COMP_CLUST = 5               # More clusters for comparison in high-variance audio data
 QS_VAR = 0                     # Diameter (stable with our 0.1 floor fix)
 REL_PROC_VAR = 0               # Disabled: avoids extra queries on o_pts during relevance_processing for new non-bird classes
 VERBOSE_FLAGS = []      # 0=summary, 1=add_o_pt prints (confirms non-query path), 2=anomalous checks
 
-NUM_POINTS_TO_PROCESS = 15000     # Minimal for quick verification run (npy loads + BallTree are heavy); demonstrates algorithm with low queries
+NUM_POINTS_TO_PROCESS = 1000     # Minimal for quick verification run (npy loads + BallTree are heavy); demonstrates algorithm with low queries
 N_REL_CLASSES = 5              # Target number of relevant classes to discover (for reporting)
 
 def main():
@@ -47,8 +47,12 @@ def main():
         seed=69
     )
     
+    # Hidden tracker for testing: records first-seen and first-queried per class.
+    # Completely invisible to ARED algorithm - does not affect any decisions.
+    discovery_tracker = data_stream.discovery_tracker if hasattr(data_stream, 'discovery_tracker') else None
+    
     # Oracle knows true labels but only reveals on query (simulates human-in-loop)
-    oracle = SpectrogramOracle(data_stream)
+    oracle = SpectrogramOracle(data_stream, discovery_tracker=discovery_tracker)
     
     # Initialize A_RED
     ared = ARED(
@@ -123,6 +127,31 @@ def main():
     # Oracle stats
     print(f"\nOracle queries: {oracle.get_query_count()}")
     
+    # Hidden discovery tracking report (for testing/reference ONLY - algorithm has no access)
+    if hasattr(data_stream, 'discovery_tracker') and data_stream.discovery_tracker:
+        print("\n" + "="*60)
+        print("DISCOVERY TRACKER REPORT (HIDDEN FROM ALGORITHM)")
+        print("="*60)
+        report = data_stream.discovery_tracker.get_discovery_report()
+        print(f"Total classes seen: {report['total_classes_seen']}")
+        print(f"Total classes first-queried: {report['total_classes_queried']}")
+        print(f"Total points examined: {report['total_points_examined']}")
+        print(f"Total queries made: {report['total_queries']}")
+        
+        print("\nPer-class first discovery metrics:")
+        for cls, info in report['classes'].items():
+            seen_q = info['first_seen_query_num']
+            queried_q = info.get('first_queried_query_num')
+            print(f"  {cls}: first_seen_at_query#{seen_q} (stream_idx={info['first_seen_stream_idx']})")
+            if queried_q:
+                print(f"           first_queried_at_query#{queried_q} (stream_idx={info.get('first_queried_stream_idx')})")
+                print(f"           queries_before_actual_query: {info.get('queries_before_first_query', 'N/A')}")
+            else:
+                print("           (never queried)")
+            print("  ---")
+        
+        data_stream.discovery_tracker.save_report("discovery_report.json")
+    
     # Save stats if desired
     stats = Stats(ared)
     print("\nDetailed stats available in Stats object.")
@@ -131,6 +160,7 @@ def main():
     print("No classes are marked relevant (Oracle always returns relevance=False). Once discovered, no re-querying occurs.")
     print("With REL_PROC_VAR=0 + low KAPPA, queries are near-zero (only initial anomalies + first few points).")
     print("This satisfies: query *only* on anomaly + 'none of the classes are marked as relevant, once they are discovered, we do not want to query them again.'")
+    print("\nDiscovery tracking added for testing: first-seen vs first-queried per class (e.g. Insecta may be seen early but queried much later or never).")
 
 if __name__ == "__main__":
     main()
