@@ -22,31 +22,33 @@ from Stats import Stats
 
 # ====================== CONFIG ======================
 # A_RED Parameters (tuned for low-dim Dino embeddings)
-KAPPA = 2                    # Adjusted for semantic embeddings (fewer anomalies expected)
-DATA_WINDOW_SIZE = 1000      # Larger window viable with low-dim data
+KAPPA = 2                     # Lowered for custom DINO embeddings (allows rare class detection without extreme threshold; prior 30 caused "never query" behavior after initial Aves)
+DATA_WINDOW_SIZE = 500     # Larger window to capture late-appearing rare classes (Insecta/Amphibia)
 K_COMP_CLUST = 5
 QS_VAR = 0
 REL_PROC_VAR = 0
 VERBOSE_FLAGS = []
 
-NUM_POINTS_TO_PROCESS = 500   # Small for quick verification + model download
+NUM_POINTS_TO_PROCESS = 2000   # Increased to test behavior after first few hundred points (where rare classes appear)
 N_REL_CLASSES = 5
 
 def main():
-    print("=== Spectrogram DinoV3 (DINOv2) A_RED Implementation ===")
-    print("Using DINOv2 embeddings on existing .npy spectrograms (no regeneration needed)")
+    print("=== Spectrogram DinoV3 (Custom Pretrained DINO) A_RED Implementation ===")
+    print("Using custom DINO pretrained on our spectrogram dataset (dinov3_pretrained.pth).")
+    print("384-dim domain-specific embeddings from existing .npy (no regeneration).")
     print(f"Parameters: kappa={KAPPA}, window={DATA_WINDOW_SIZE}, k_comp={K_COMP_CLUST}, qs_var={QS_VAR}")
-    print("DinoV2 provides 384-dim semantic features -> faster NN queries, better clustering.")
+    print("Lower kappa + larger window + stratified pretrain addresses Aves skew (98%+ of data) and late rare-class detection ('never query' issue).")
     print()
     
-    # Initialize DinoV2 data stream (embeddings from existing tensors)
+    # Initialize data stream with custom pretrained model
     data_stream = Dinov3DataStream(
         csv_path="5sSpectrograms_tensors/train_5s_spectrograms.csv",
         tensor_dir="5sSpectrograms_tensors",
         max_samples=NUM_POINTS_TO_PROCESS if NUM_POINTS_TO_PROCESS > 0 else None,
         shuffle=True,
-        seed=69,
-        dino_model_name="facebook/dinov2-small"
+        seed=420,
+        dino_model_name="facebook/vit_small_patch16_dinov3.lvd1689m",
+        use_pretrained="dinov3_pretrained_final.pth"
     )
     
     # Hidden tracker (reused from discovery work)
@@ -148,8 +150,9 @@ def main():
     
     stats = Stats(ared)
     print("\nDetailed stats available in Stats object.")
-    print("\nNote: DinoV2 embeddings used on *existing* .npy files (feasible, no regeneration).")
-    print("Semantic features should improve accuracy and reduce queries vs raw spectrograms.")
+    print("\nNote: Custom DINO model pretrained on our dataset (5 epochs on subset, student ViT).")
+    print("Uses existing .npy files (feasible, no regeneration needed).")
+    print("Domain-specific embeddings should improve A_RED clustering vs generic DINOv2.")
     print("New process isolated in Spectrogram_DinoV3/ folder.")
 
 if __name__ == "__main__":

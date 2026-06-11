@@ -5,7 +5,7 @@ from pathlib import Path
 from PIL import Image
 import pandas as pd
 from sklearn.preprocessing import LabelEncoder
-
+import torchvision.transforms as transforms
 class Dinov3PretrainDataset(Dataset):
     """
     Unlabeled dataset for DINO pretraining.

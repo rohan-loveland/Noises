@@ -1,140 +1,186 @@
-import numpy as np
-import torch
-from pathlib import Path
-import pandas as pd
-from collections import defaultdict
-import json
-from datetime import datetime
-from PIL import Image
-import torchvision.transforms as transforms
+"""
+Dinov3DataStream.py - Fully compatible with SpectrogramOracle
+"""
 
-# Try to import HF transformers for DinoV2; graceful fallback
-try:
-    from transformers import AutoImageProcessor, AutoModel
-    TRANSFORMERS_AVAILABLE = True
-except ImportError:
-    TRANSFORMERS_AVAILABLE = False
-    print("Warning: transformers not installed. Install with: pip install transformers torchvision")
+import sys
+from pathlib import Path
+import numpy as np
+import pandas as pd
+import torch
+import torchvision.transforms as transforms
+from PIL import Image
+import timm
+
+class DiscoveryTracker:
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.total_points_examined = 0
+        self.total_queries = 0
+        self.classes_first_seen = {}
+        self.classes_first_queried = {}
+        self.first_seen_stream_idx = {}
+        self.first_queried_stream_idx = {}
+
+    def record_point(self, true_label, stream_idx, is_query=False):
+        self.total_points_examined += 1
+        if true_label not in self.classes_first_seen:
+            self.classes_first_seen[true_label] = stream_idx
+            self.first_seen_stream_idx[true_label] = stream_idx
+        if is_query and true_label not in self.classes_first_queried:
+            self.classes_first_queried[true_label] = stream_idx
+            self.first_queried_stream_idx[true_label] = stream_idx
+
+    # === Added for compatibility with SpectrogramOracle ===
+    def record_query(self, true_label, stream_idx):
+        """Called by SpectrogramOracle when a query happens."""
+        self.total_queries += 1
+        self.record_point(true_label, stream_idx, is_query=True)
+
+    def get_discovery_report(self):
+        report = {
+            'total_points_examined': self.total_points_examined,
+            'total_queries': self.total_queries,
+            'total_classes_seen': len(self.classes_first_seen),
+            'total_classes_queried': len(self.classes_first_queried),
+            'classes': {}
+        }
+        for cls in self.classes_first_seen:
+            report['classes'][cls] = {
+                'first_seen_stream_idx': self.first_seen_stream_idx.get(cls),
+                'first_queried_stream_idx': self.first_queried_stream_idx.get(cls),
+                'queries_before_first_query': self.first_queried_stream_idx.get(cls, 0) - 
+                                             (self.first_seen_stream_idx.get(cls, 0) if cls in self.first_seen_stream_idx else 0)
+            }
+        return report
+
+    def save_report(self, path="dinov3_discovery_report.json"):
+        import json
+        with open(path, 'w') as f:
+            json.dump(self.get_discovery_report(), f, indent=2)
 
 
 class Dinov3DataStream:
-    """
-    DinoV2 (DinoV3 alias) embedding stream for A_RED.
-    Loads existing .npy Mel-spectrograms, converts to image, extracts 384-dim semantic embedding.
-    Completely compatible with existing 5sSpectrograms_tensors/*.npy + CSV.
-    No audio regeneration needed. Reuses discovery tracker.
-    """
-    def __init__(self, csv_path: str = "5sSpectrograms_tensors/train_5s_spectrograms.csv", 
-                 tensor_dir: str = "5sSpectrograms_tensors", max_samples=None, shuffle=True, seed=42,
-                 dino_model_name: str = "facebook/dinov2-small"):
+    def __init__(self, 
+                 csv_path="5sSpectrograms_tensors/train_5s_spectrograms.csv",
+                 tensor_dir="5sSpectrograms_tensors",
+                 max_samples=None,
+                 shuffle=True,
+                 seed=42,
+                 dino_model_name="vit_small_patch16_224",
+                 use_pretrained=None, #"dinov3_pretrained_final.pth",
+                 embed_dim=384,
+                 device=None):
+        
         self.csv_path = Path(csv_path)
         self.tensor_dir = Path(tensor_dir)
+        self.shuffle = shuffle
+        self.seed = seed
         self.max_samples = max_samples
-        self.stream_counter = 0
-        self.dino_model_name = dino_model_name
-        self.embed_dim = 384  # small model
-        
-        # Hidden discovery tracker (for testing/reference only - not visible to ARED algorithm)
-        self.discovery_tracker = DiscoveryTracker()
-        
-        # Load metadata (reuse exact logic from SpectrogramDataStream)
+        self.embed_dim = embed_dim
+        self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
         self.df = pd.read_csv(self.csv_path)
-        if 'spectrogram_npy_path' not in self.df.columns:
-            raise ValueError("CSV must contain 'spectrogram_npy_path' column")
-        
-        if shuffle:
-            self.df = self.df.sample(frac=1, random_state=seed).reset_index(drop=True)
-        
-        if max_samples is not None:
-            self.df = self.df.head(max_samples).reset_index(drop=True)
+        if self.max_samples:
+            self.df = self.df.sample(n=min(self.max_samples, len(self.df)), random_state=seed).reset_index(drop=True)
         
         self.n_samples = len(self.df)
-        print(f"Loaded {self.n_samples:,} spectrogram samples for DinoV2 streaming")
-        print(f"Example path: {self.df.iloc[0]['spectrogram_npy_path']}")
-        print(f"DinoV2 model: {dino_model_name} (embed dim={self.embed_dim})")
-        
-        # Load DinoV2 model + processor (one-time, cached)
-        if TRANSFORMERS_AVAILABLE:
-            self.processor = AutoImageProcessor.from_pretrained(dino_model_name)
-            self.model = AutoModel.from_pretrained(dino_model_name)
+        print(f"Loaded {self.n_samples:,} 5s spectrogram samples for streaming.")
+
+        self.discovery_tracker = DiscoveryTracker()
+
+        # Load DINOv3 model
+        self.model = None
+        if use_pretrained and Path(use_pretrained).exists():
+            print(f"Loading custom DINOv3 checkpoint: {use_pretrained}")
+            self.model = timm.create_model(dino_model_name, pretrained=False, num_classes=0).to(self.device)
+            ckpt = torch.load(use_pretrained, map_location=self.device)
+            self.model.load_state_dict(ckpt['student_state_dict'])
             self.model.eval()
-            if torch.cuda.is_available():
-                self.model = self.model.to('cuda')
-            print("DinoV2 model loaded successfully (semantic embeddings enabled)")
+            print("✅ Model loaded successfully")
         else:
-            self.processor = None
-            self.model = None
-            print("WARNING: Falling back to mean-pooled spectrogram (no DinoV2)")
+            print("Warning: No custom checkpoint found.")
+
+        self.embeddings = None
+        self._try_load_precomputed_embeddings()
+
+        self.current_idx = 0
+        self.indices = np.arange(self.n_samples)
+        if self.shuffle:
+            np.random.seed(self.seed)
+            np.random.shuffle(self.indices)
+
+    def _try_load_precomputed_embeddings(self):
+        embed_path = self.tensor_dir / "dinov3_embeddings.npy"
+        if embed_path.exists():
+            print(f"✅ Loading precomputed embeddings from {embed_path}")
+            self.embeddings = np.load(embed_path, mmap_mode='r')
+        else:
+            print("Precomputed embeddings not found → extracting on-the-fly.")
+
+    @torch.no_grad()
+    def _extract_embedding(self, spec_npy_path):
+        if self.model is None:
+            spec = np.load(self.tensor_dir / spec_npy_path, mmap_mode='r').astype(np.float32)
+            return spec.flatten()[:self.embed_dim]
+
+        spec = np.load(self.tensor_dir / spec_npy_path, mmap_mode='r').astype(np.float32)
         
-        # Image transform for spectrogram-as-image
-        self.transform = transforms.Compose([
+        if spec.ndim == 2:
+            spec_norm = ((spec - spec.min()) / (spec.max() - spec.min() + 1e-8) * 255).clip(0, 255).astype(np.uint8)
+            image = Image.fromarray(spec_norm).convert('RGB')
+        else:
+            image = Image.fromarray(spec.squeeze().astype(np.uint8)).convert('RGB')
+
+        transform = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
-            transforms.Normalize(mean=[0.5], std=[0.5]),  # grayscale normalized
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ])
-    
+        img_tensor = transform(image).unsqueeze(0).to(self.device)
+
+        features = self.model(img_tensor)
+        embedding = features.squeeze(0).cpu().numpy()
+        embedding = (embedding - embedding.mean()) / (embedding.std() + 1e-8)
+        return embedding
+
     def stream_new_data_point(self):
-        """Load .npy → DinoV2 embedding (384-dim vector). Reuses tracker."""
-        if self.stream_counter >= self.n_samples:
-            raise StopIteration("No more data points")
-        
-        row = self.df.iloc[self.stream_counter]
-        npy_rel_path = row['spectrogram_npy_path']
-        npy_path = self.tensor_dir / npy_rel_path
-        
-        if not npy_path.exists():
-            print(f"  WARNING: File not found - {npy_path}")
-            self.stream_counter += 1
-            if self.stream_counter >= self.n_samples:
-                raise StopIteration("No more data points")
-            return self.stream_new_data_point()
-        
-        # Record for hidden discovery tracking BEFORE algorithm sees the point
-        true_label = self.get_true_label_for_idx(self.stream_counter)
-        self.discovery_tracker.record_examined_point(true_label, self.stream_counter)
-        
-        # Load spectrogram (reuse from original)
-        spec = np.load(npy_path).astype(np.float32)
-        
-        # Convert to image for DinoV2 (grayscale spectrogram)
-        if spec.ndim == 2:
-            # Normalize to [0, 255] for PIL
-            spec_norm = ((spec - spec.min()) / (spec.max() - spec.min() + 1e-8) * 255).astype(np.uint8)
-            image = Image.fromarray(spec_norm)
+        if self.current_idx >= self.n_samples:
+            raise StopIteration("End of stream")
+
+        idx = self.indices[self.current_idx]
+        row = self.df.iloc[idx]
+
+        if self.embeddings is not None:
+            embedding = self.embeddings[idx]
         else:
-            image = Image.fromarray(spec.squeeze().astype(np.uint8))
-        
-        if self.model is not None and TRANSFORMERS_AVAILABLE:
-            # DinoV2 embedding
-            if torch.cuda.is_available():
-                inputs = self.processor(images=image, return_tensors="pt").to('cuda')
-            else:
-                inputs = self.processor(images=image, return_tensors="pt")
-            
-            with torch.no_grad():
-                outputs = self.model(**inputs)
-                # Use CLS token or mean pool (DINOv2 best practice: last_hidden_state mean)
-                embedding = outputs.last_hidden_state.mean(dim=1).squeeze().cpu().numpy()
-        else:
-            # Fallback: mean-pool as in original (for testing without deps)
-            if spec.ndim == 2:
-                embedding = np.mean(spec, axis=1)  # simple reduction
-            else:
-                embedding = spec.flatten()[:384]  # truncate for compatibility
-        
-        self.stream_counter += 1
+            embedding = self._extract_embedding(row['spectrogram_npy_path'])
+
+        self.discovery_tracker.record_point(self.get_true_label_for_idx(idx), self.current_idx)
+        self.current_idx += 1
         return embedding.astype(np.float32)
-    
+
+    # === Required by SpectrogramOracle ===
+    def get_true_label_for_idx(self, idx):
+        row = self.df.iloc[idx]
+        return row.get('class_name') or row.get('primary_label') or f"unknown_{idx}"
+
     def get_remaining_num_points(self):
-        return self.n_samples - self.stream_counter
-    
-    def get_true_label_for_idx(self, stream_idx):
-        """For oracle or evaluation only - program should not use during normal streaming"""
-        if stream_idx >= len(self.df):
-            return None
-        row = self.df.iloc[stream_idx]
-        return row.get('class_name', row.get('primary_label', 'unknown'))
+        return self.n_samples - self.current_idx
+
+    def reset(self):
+        self.current_idx = 0
+        self.discovery_tracker.reset()
+        if self.shuffle:
+            np.random.shuffle(self.indices)
 
 
-# Reuse DiscoveryTracker from parent module (import will be handled in main)
-from Spectrogram_A_RED.SpectrogramDataStream import DiscoveryTracker
+# Quick test
+if __name__ == "__main__":
+    stream = Dinov3DataStream(max_samples=100, shuffle=False)
+    print("Testing stream...")
+    for i in range(5):
+        emb = stream.stream_new_data_point()
+        print(f"Point {i}: shape={emb.shape}, norm={np.linalg.norm(emb):.2f}")
+    print("Stream test complete.")

@@ -1,3 +1,7 @@
 /Data/
 /5sSpectrograms_tensors/
 /prepared_5s_clips/
+/pngSpectrograms/
+/perch/bird-vocalization-classifier-tensorflow2-perch_v2-v2/
+*.pth
+/.vscode

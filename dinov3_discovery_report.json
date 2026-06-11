@@ -1,0 +1,28 @@
+{
+  "total_points_examined": 2288,
+  "total_queries": 288,
+  "total_classes_seen": 4,
+  "total_classes_queried": 4,
+  "classes": {
+    "Aves": {
+      "first_seen_stream_idx": 0,
+      "first_queried_stream_idx": 0,
+      "queries_before_first_query": 0
+    },
+    "Amphibia": {
+      "first_seen_stream_idx": 55,
+      "first_queried_stream_idx": 641,
+      "queries_before_first_query": 586
+    },
+    "Insecta": {
+      "first_seen_stream_idx": 144,
+      "first_queried_stream_idx": 946,
+      "queries_before_first_query": 802
+    },
+    "Mammalia": {
+      "first_seen_stream_idx": 368,
+      "first_queried_stream_idx": 1730,
+      "queries_before_first_query": 1362
+    }
+  }
+}

@@ -1,6 +1,7 @@
 import numpy as np
 from pathlib import Path
 import pandas as pd
+import torchvision.transforms as transforms
 
 class SpectrogramDataStream:
     def __init__(self, csv_path: str = "5sSpectrograms_tensors/train_5s_spectrograms.csv", tensor_dir: str = "5sSpectrograms_tensors", max_samples=None, shuffle=True, seed=42):
@@ -65,11 +66,11 @@ class SpectrogramDataStream:
         data_point = spec.flatten()
         
         # L2 normalization (unit vector) - critical for high-dim data
-        #norm = np.linalg.norm(data_point)
-        #if norm > 0:
-        #    data_point = data_point / norm
-        #else:
-        #    print("  WARNING: Zero-norm spectrogram encountered")
+        norm = np.linalg.norm(data_point)
+        if norm > 0:
+            data_point = data_point / norm
+        else:
+            print("  WARNING: Zero-norm spectrogram encountered")
         
         self.stream_counter += 1
         return data_point
@@ -86,9 +87,10 @@ class SpectrogramDataStream:
 
 
 class SpectrogramOracle:
-    def __init__(self, data_stream):
+    def __init__(self, data_stream, discovery_tracker=None):
         self.data_stream = data_stream  # reference to access true labels
         self.query_count = 0
+        self.discovery_tracker = discovery_tracker  # hidden tracker for testing only
     
     def answer_query(self, abs_index):
         """Oracle returns true label and relevance. 
@@ -97,8 +99,15 @@ class SpectrogramOracle:
         Only true bird points trigger relevance=True + query. Directly satisfies 'only query on anomaly' + 'as close to zero queries as possible'."""
         self.query_count += 1
         true_label = self.data_stream.get_true_label_for_idx(abs_index)
+        if self.discovery_tracker:
+            self.discovery_tracker.record_query(true_label, abs_index)
         # Relevance = False for *all* classes (including discovered birds). This ensures no cluster.relevance=True, so comp_cluster_relevant=False always.
         # After initial discovery, no further queries (add_o_pt path for non-anomalous points). Matches "none of the classes are marked as relevant, once they are discovered, we do not want to query them again."
+        #if true_label != "Aves":
+        #    #print(true_label)
+        #    relevance = True
+        #else:
+        #    relevance = False
         relevance = False
         return true_label, relevance
     
