@@ -39,9 +39,12 @@ def main():
     print()
     
     # Initialize data stream (loads CSV metadata, streams .npy on demand, flattens to 1D vector)
+    # Use paths relative to this script so it works from any CWD and on Linux/Windows
+    script_dir = Path(__file__).parent
+    project_root = script_dir.parent
     data_stream = SpectrogramDataStream(
-        csv_path="5sSpectrograms_tensors/train_5s_spectrograms.csv",
-        tensor_dir="5sSpectrograms_tensors",
+        csv_path=str(project_root / "5sSpectrograms_tensors" / "train_5s_spectrograms_linux.csv"),
+        tensor_dir=str(project_root / "5sSpectrograms_tensors"),
         max_samples=NUM_POINTS_TO_PROCESS if NUM_POINTS_TO_PROCESS > 0 else None,
         shuffle=True,  # Deterministic order for reproducible test
         seed=420

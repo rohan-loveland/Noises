@@ -4,4 +4,14 @@
 /pngSpectrograms/
 /perch/bird-vocalization-classifier-tensorflow2-perch_v2-v2/
 *.pth
+*.pyc
 /.vscode
+/viz_umap_test/
+/viz_test_smoke/
+/viz_test_minority/
+/viz_outputs/
+/viz_dino_test/
+AIxDKE_2026.pdf
+birdclef_audio_stats.json
+IJSC_2026-1.pdf
+SPIE_IVSP_2026.pdf
