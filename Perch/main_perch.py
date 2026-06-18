@@ -111,7 +111,7 @@ class ClassDiscoveryCounter:
 # Perch embeddings are semantic (much cleaner clusters than pooled spectrograms),
 # so these values are a great starting point. You can raise K_COMP_CLUST or
 # DATA_WINDOW_SIZE if you want more aggressive merging / longer memory.
-KAPPA = 1.179217
+KAPPA = 1.15
 DATA_WINDOW_SIZE = 250
 K_COMP_CLUST = 5
 QS_VAR = 0
@@ -148,7 +148,7 @@ def main():
         embeddings_path=str(project_root / "5sSpectrograms_tensors" / "perch_embeddings.npy"),
         max_samples=NUM_POINTS_TO_PROCESS if NUM_POINTS_TO_PROCESS > 0 else None,
         shuffle=do_shuffle,
-        seed=56,
+        seed=420,
         label_column=label_col,   # change to "scientific_name" for species-level experiments
         live_batch_size=4,           # safe for 8 GB VRAM during live preload
     )
@@ -280,14 +280,14 @@ def main():
     print("  • For dominant class (~99%), lift near 1.0 is expected")
     print("  • Geometric model: random expected queries = 1 / prevalence")
 
-#
-    #print("\nCluster Summary:")
-    #for i, cluster in enumerate(ared.subspace_partition.cluster_list):
-    #    if cluster.label is not None:
-    #        n_l = len(cluster.l_pts)
-    #        n_o = len(cluster.o_pts)
-    #        print(f"  Cluster {i}: label={cluster.label}, relevance={cluster.relevance}, "
-    #              f"l_pts={n_l}, o_pts={n_o}, comp_dist={cluster.comp_distance:.4f}")
+
+    print("\nCluster Summary:")
+    for i, cluster in enumerate(ared.subspace_partition.cluster_list):
+        if cluster.label is not None:
+            n_l = len(cluster.l_pts)
+            n_o = len(cluster.o_pts)
+            print(f"  Cluster {i}: label={cluster.label}, relevance={cluster.relevance}, "
+                  f"l_pts={n_l}, o_pts={n_o}, comp_dist={cluster.comp_distance:.4f}")
 
     print(f"\nOracle queries: {oracle.get_query_count()}")
 
