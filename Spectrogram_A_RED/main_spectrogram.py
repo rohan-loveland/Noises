@@ -29,7 +29,7 @@ QS_VAR = 0                     # Diameter (stable with our 0.1 floor fix)
 REL_PROC_VAR = 0               # Disabled: avoids extra queries on o_pts during relevance_processing for new non-bird classes
 VERBOSE_FLAGS = []      # 0=summary, 1=add_o_pt prints (confirms non-query path), 2=anomalous checks
 
-NUM_POINTS_TO_PROCESS = 2000     # Minimal for quick verification run (npy loads + BallTree are heavy); demonstrates algorithm with low queries
+NUM_POINTS_TO_PROCESS = 5000     # Minimal for quick verification run (npy loads + BallTree are heavy); demonstrates algorithm with low queries
 N_REL_CLASSES = 5              # Target number of relevant classes to discover (for reporting)
 
 def main():
@@ -47,7 +47,7 @@ def main():
         tensor_dir=str(project_root / "5sSpectrograms_tensors"),
         max_samples=NUM_POINTS_TO_PROCESS if NUM_POINTS_TO_PROCESS > 0 else None,
         shuffle=True,  # Deterministic order for reproducible test
-        seed=420
+        seed=42
     )
     
     # Oracle knows true labels but only reveals on query (simulates human-in-loop)

@@ -68,7 +68,7 @@ class Dinov3DataStream:
                  max_samples=None,
                  shuffle=True,
                  seed=42,
-                 dino_model_name="vit_small_patch16_224",
+                 dino_model_name="vit_small_patc2h16_dinov3.lvd1689m",
                  use_pretrained=None, #"dinov3_pretrained_final.pth",
                  embed_dim=384,
                  device=None):

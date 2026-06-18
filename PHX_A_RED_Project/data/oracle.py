@@ -28,11 +28,12 @@ class NoRelevanceOracle:
 
     Always returns relevance=False.
     Optionally wires a discovery_tracker (DiscoveryTracker or ClassDiscoveryCounter)
-    that receives record_query(true_label, abs_index).
+    that receives record_query calls.
 
-    Some historical trackers expected (label, idx, query_count). We support both:
-    - If the tracker has record_query(self, label, idx, query_count) we call the 3-arg form.
-    - Otherwise we call record_query(self, label, idx).
+    We prefer the 3-argument form record_query(label, abs_index, query_count)
+    because ClassDiscoveryCounter (the one that powers lift / RED metrics)
+    records the exact query ordinal needed for the geometric baseline.
+    We fall back to the 2-argument form for lightweight/legacy trackers.
     """
 
     def __init__(self, data_stream, discovery_tracker: Optional[object] = None):
@@ -45,16 +46,20 @@ class NoRelevanceOracle:
         true_label = self.data_stream.get_true_label_for_idx(abs_index)
 
         if self.discovery_tracker is not None:
-            # Support both common tracker signatures
+            # Always try to supply the query_count (3-arg) first.
+            # The rich ClassDiscoveryCounter (used for lift calculations) needs it.
+            # Lightweight DiscoveryTracker and some legacy counters only accept 2 args.
+            tracker = self.discovery_tracker
+            qc = self.query_count
             try:
-                # Preferred modern signature used by our utils
-                self.discovery_tracker.record_query(true_label, abs_index)
+                tracker.record_query(true_label, abs_index, qc)
             except TypeError:
                 try:
-                    # Legacy 3-arg version (some older ClassDiscoveryCounter copies)
-                    self.discovery_tracker.record_query(true_label, abs_index, self.query_count)
+                    tracker.record_query(true_label, abs_index)
                 except Exception:
-                    pass  # tracker is best-effort
+                    pass  # best-effort; never break the ARED loop because of tracking
+            except Exception:
+                pass
 
         # THE KEY BEHAVIOR: never mark anything relevant
         relevance = False

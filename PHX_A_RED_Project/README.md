@@ -69,6 +69,54 @@ exp.print_report()
 - Discovery counters and the kappa controller are optional and compose cleanly.
 - The core ARED implementation lives in `A_REDimplementation/A_RED/` and is imported (never modified).
 
+## Understanding the Class Discovery Report (for Rare Event Detection)
+
+When you call `exp.print_report()` (or the runner finishes) you will see a block that looks like this:
+
+```
+Class Discovery Report (vs Random Baseline):
+  Classes seen: 87 | Discovered: 12 | Total queries: 14
+  Dataset size processed: 500 points
+  ...
+  caucoo1  | prevalence= 0.20% | seen index=12 | queried index=34 | discovery query=3 | expected random≈500 | lift=166.7x | seen before=1 | (total=1)
+  ...
+Interpretation:
+  • lift > 1.0  = discovered faster than random (good)
+  • lift >> 1.0 = strong active discovery of rare classes
+  • ...
+```
+
+### Key columns / metrics
+- **prevalence**: fraction of the stream belonging to this label (after your shuffle + --num-points).
+- **seen index / queried index**: ARED's internal processed point index (0-based "algorithm time").
+- **discovery query**: the 1-based ordinal of the oracle query that first revealed the class. This is the budget cost.
+- **expected random**: under a dumb uniform random labeling policy you would expect to hit a class of this prevalence on query number `1/prevalence`.
+- **lift**: `expected_random / discovery_query`. How many times earlier (in labeling budget) A_RED found the class compared to random. This is the primary figure of merit for rare-event work.
+- **seen before**: number of real examples of this class that arrived *before* we spent a query on it. They were absorbed into other clusters as "o_pts" (other points). For rare audio events this number tells you how many missed opportunities / how much unlabeled mass went by.
+
+At the bottom of the report (new in the unified code) you also get a quick **Rare classes** aggregate using a default 1% prevalence cutoff:
+- how many rare classes were seen vs. discovered
+- median lift among the rare ones you *did* discover
+- total unlabeled rare instances ("wasted" from a labeling perspective)
+
+### Programmatic access
+```python
+exp = run_ared("perch", num_points=2000, label_column="scientific_name")
+m = exp.get_discovery_metrics(rare_threshold=0.005)   # 0.5%
+print(m["median_lift_rare_discovered"])
+exp.print_rare_event_summary(rare_threshold=0.01)
+```
+
+### Why this matters for rare event detection in audio
+Bioacoustic datasets are extremely long-tailed. A few common species dominate the recordings; the interesting events (uncommon species, unusual calls, anomalies) are rare.
+
+Traditional random sampling or even confidence-based active learning wastes most of the labeling budget on the head of the distribution. A_RED's design (anomaly test + "relevance=False forever") + these metrics let you quantify:
+- Did my embedding (Perch vs DinoV3 vs spectrogram) + A_RED actually surface the tail classes early?
+- How many real rare clips did I let pass unlabeled under a given query budget?
+- Is the lift on the rarest classes high enough to justify the pipeline in production?
+
+Use `--label-column scientific_name` (or whatever your species column is) when you care about fine-grained rarity.
+
 ## Relationship to Original Code
 
 This package re-uses the *design and logic* from the original frontends but is self-contained under `PHX_A_RED_Project/`. Original files continue to work exactly as before.

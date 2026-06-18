@@ -22,14 +22,14 @@ from Stats import Stats
 
 # ====================== CONFIG ======================
 # A_RED Parameters (tuned for low-dim Dino embeddings)
-KAPPA = 2                     # Lowered for custom DINO embeddings (allows rare class detection without extreme threshold; prior 30 caused "never query" behavior after initial Aves)
-DATA_WINDOW_SIZE = 500     # Larger window to capture late-appearing rare classes (Insecta/Amphibia)
+KAPPA = 1.5                     # Lowered for custom DINO embeddings (allows rare class detection without extreme threshold; prior 30 caused "never query" behavior after initial Aves)
+DATA_WINDOW_SIZE = 250     # Larger window to capture late-appearing rare classes (Insecta/Amphibia)
 K_COMP_CLUST = 5
 QS_VAR = 0
 REL_PROC_VAR = 0
 VERBOSE_FLAGS = []
 
-NUM_POINTS_TO_PROCESS = 2000   # Increased to test behavior after first few hundred points (where rare classes appear)
+NUM_POINTS_TO_PROCESS = 5000   # Increased to test behavior after first few hundred points (where rare classes appear)
 N_REL_CLASSES = 5
 
 def main():
@@ -42,13 +42,13 @@ def main():
     
     # Initialize data stream with custom pretrained model
     data_stream = Dinov3DataStream(
-        csv_path="5sSpectrograms_tensors/train_5s_spectrograms.csv",
+        csv_path="5sSpectrograms_tensors/train_5s_spectrograms_linux.csv",
         tensor_dir="5sSpectrograms_tensors",
         max_samples=NUM_POINTS_TO_PROCESS if NUM_POINTS_TO_PROCESS > 0 else None,
         shuffle=True,
-        seed=420,
+        seed=42,
         dino_model_name="facebook/vit_small_patch16_dinov3.lvd1689m",
-        use_pretrained="dinov3_pretrained_final.pth"
+        use_pretrained=None #"dinov3_pretrained_final.pth"
     )
     
     # Hidden tracker (reused from discovery work)

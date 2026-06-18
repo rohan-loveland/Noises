@@ -148,7 +148,7 @@ def main():
         embeddings_path=str(project_root / "5sSpectrograms_tensors" / "perch_embeddings.npy"),
         max_samples=NUM_POINTS_TO_PROCESS if NUM_POINTS_TO_PROCESS > 0 else None,
         shuffle=do_shuffle,
-        seed=420,
+        seed=552,
         label_column=label_col,   # change to "scientific_name" for species-level experiments
         live_batch_size=4,           # safe for 8 GB VRAM during live preload
     )

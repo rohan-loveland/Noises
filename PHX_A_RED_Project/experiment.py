@@ -30,6 +30,8 @@ Usage (direct):
     )
     exp.run(num_points=500, controller=None)   # or pass a ShiftingKappaController
     exp.print_report()
+    print(exp.get_discovery_metrics(rare_threshold=0.005))  # RED-focused numbers + lift
+    exp.print_rare_event_summary()
 
 Or the one-liner:
     from PHX_A_RED_Project import run_ared
@@ -46,7 +48,11 @@ from .data.base_stream import BaseDataStream
 from .data.oracle import NoRelevanceOracle
 from .utils.discovery import ClassDiscoveryCounter
 from .utils.controllers import ShiftingKappaController
-from .utils.reporting import print_cluster_summary
+from .utils.reporting import (
+    print_cluster_summary,
+    print_class_discovery_report,
+    get_class_discovery_table,
+)
 
 # The core ARED is imported lazily (see _get_ared_class) so that users can
 # import data streams / oracles / utils without needing every dependency
@@ -264,43 +270,67 @@ class AREDExperiment:
             print_cluster_summary(self.ared.subspace_partition.cluster_list, only_labeled=True)
 
     def _print_discovery_report(self):
+        """Delegate to the canonical shared implementation (matches Perch/main_perch.py style)."""
         dc = self.discovery_counter
-        seen = dc.get_seen_count()
-        disc = dc.get_discovered_count()
-        N = self.points_processed
+        N = self.points_processed or 0
         Q = len(self.ared.labeled_data.abs_idx_array)
+        print_class_discovery_report(dc, N, Q)
 
-        print("\nClass Discovery Report (vs Random Baseline):")
-        print(f"  Classes seen: {seen} | Discovered: {disc} | Total queries: {Q}")
-        print(f"  Dataset size processed: {N:,} points")
+    def get_discovery_metrics(self, rare_threshold: float = 0.01) -> dict:
+        """
+        Return rich discovery statistics for programmatic / RED analysis use.
 
-        if seen == 0:
+        Includes:
+        - basic counts
+        - per-class table (with lift + enrichment)
+        - aggregates focused on rare classes (prevalence < rare_threshold)
+        """
+        if self.discovery_counter is None:
+            return {"error": "no discovery_counter attached"}
+
+        dc = self.discovery_counter
+        N = self.points_processed or 0
+        Q = len(getattr(self.ared, "labeled_data", None) and self.ared.labeled_data.abs_idx_array or [])
+        table = get_class_discovery_table(dc, N, Q)
+
+        rare_rows = [r for r in table if r["prevalence"] < rare_threshold]
+        discovered_rare = [r for r in rare_rows if r["discovery_query"]]
+        lifts = [r["lift"] for r in discovered_rare if r["lift"] is not None]
+
+        median_lift = None
+        if lifts:
+            s = sorted(lifts)
+            m = len(s) // 2
+            median_lift = s[m] if len(s) % 2 else (s[m-1] + s[m]) / 2
+
+        total_unlabeled_rare = sum(r["seen_before_queried"] for r in rare_rows)
+
+        return {
+            "N": N,
+            "queries": Q,
+            "classes_seen": dc.get_seen_count(),
+            "classes_discovered": dc.get_discovered_count(),
+            "rare_threshold": rare_threshold,
+            "rare_classes_seen": len(rare_rows),
+            "rare_classes_discovered": len(discovered_rare),
+            "median_lift_rare_discovered": median_lift,
+            "total_unlabeled_rare_instances": total_unlabeled_rare,
+            "per_class": table,
+        }
+
+    def print_rare_event_summary(self, rare_threshold: float = 0.01):
+        """Convenience: print the main discovery report + a short rare-focused tail summary."""
+        if self.discovery_counter is None:
+            print("(no discovery counter)")
             return
-
-        print("  Per-class (sorted by appearance order):")
-        # Build items with appearance order
-        items = []
-        for label, first_app in dc.first_appearance.items():
-            q_for = dc.get_queries_for_class(label)
-            first_q = dc.get_first_query_count(label)
-            before = dc.get_seen_before_queried(label)
-            total_of_class = dc.get_total_seen(label)
-            items.append((first_app, label, first_q, q_for, before, total_of_class))
-
-        items.sort(key=lambda x: x[0])
-
-        for first_app, label, first_q, q_for, before, total_of_class in items:
-            if Q > 0:
-                share_of_queries = q_for / Q
-            else:
-                share_of_queries = 0.0
-            prevalence = total_of_class / N if N > 0 else 0.0
-            enrichment = (share_of_queries / prevalence) if prevalence > 0 else float("inf")
-            print(
-                f"    {label}: first_app={first_app}, first_query_at={first_q or '-'}, "
-                f"seen_before_query={before}, queries={q_for}, "
-                f"enrich={enrichment:.2f}x"
-            )
+        self._print_discovery_report()
+        m = self.get_discovery_metrics(rare_threshold=rare_threshold)
+        print("\nRare-Event Summary (for tail detection):")
+        print(f"  Rare threshold: < {rare_threshold*100:.2f}% prevalence")
+        print(f"  Rare classes seen: {m['rare_classes_seen']} | discovered: {m['rare_classes_discovered']}")
+        if m["median_lift_rare_discovered"] is not None:
+            print(f"  Median lift on discovered rare classes: {m['median_lift_rare_discovered']:.1f}x")
+        print(f"  Total rare audio events that went unlabeled before discovery: {m['total_unlabeled_rare_instances']}")
 
     def get_results(self) -> dict:
         """Return a compact dict of results for programmatic use."""
