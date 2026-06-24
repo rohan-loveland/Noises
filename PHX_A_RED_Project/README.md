@@ -67,7 +67,7 @@ exp.print_report()
 - Oracle policy is deliberately `relevance=False` for every class. This implements "query only on true anomaly" and "do not re-query discovered classes".
 - All vectors fed to ARED are L2-normalized unit vectors.
 - Discovery counters and the kappa controller are optional and compose cleanly.
-- The core ARED implementation lives in `A_REDimplementation/A_RED/` and is imported (never modified).
+- The core ARED implementation lives in `A_REDimplementation/A_RED/` (currently using A_REDIN.py) and is imported (never modified).
 
 ## Understanding the Class Discovery Report (for Rare Event Detection)
 

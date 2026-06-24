@@ -28,7 +28,7 @@ class ShiftingKappaController:
         self,
         target_queries_per_100: float = 4.0,
         window_size: int = 500,
-        min_kappa: float = 0.3,
+        min_kappa: float = 0.1,
         max_kappa: float = 8.0,
         adjust_every: int = 20,
         warmup_points: int = 50,

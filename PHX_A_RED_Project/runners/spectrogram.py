@@ -19,6 +19,8 @@ def main():
     parser.add_argument("--k-comp", type=int, default=5)
     parser.add_argument("--no-shuffle", action="store_true")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--save-results", action="store_true", help="Write per-class discovery query ordinals to results/ folder")
+    parser.add_argument("--results-dir", type=str, default="results")
     args = parser.parse_args()
 
     run_ared(
@@ -30,6 +32,8 @@ def main():
         k_comparison_clusters=args.k_comp,
         shuffle=not args.no_shuffle,
         seed=args.seed,
+        save_results=args.save_results,
+        results_dir=args.results_dir,
     )
 
 

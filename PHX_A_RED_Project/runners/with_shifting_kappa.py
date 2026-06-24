@@ -50,6 +50,8 @@ def main():
     parser.add_argument("--fast", action="store_true", help="fast_mode for ClassDiscoveryCounter (long runs)")
     parser.add_argument("--status-every", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--save-results", action="store_true", help="Write per-class discovery query ordinals to results/ folder")
+    parser.add_argument("--results-dir", type=str, default="results")
     args = parser.parse_args()
 
     shuffle = not args.no_shuffle
@@ -91,6 +93,12 @@ def main():
     )
 
     exp.print_report()
+
+    if args.save_results:
+        try:
+            exp.save_discovery_record(out_dir=args.results_dir, prefix="", method="ared_shifting_kappa")
+        except Exception as e:
+            print(f"[save] Failed: {e}")
 
     # Extra controller summary
     print("\n" + controller.get_summary())

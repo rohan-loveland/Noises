@@ -13,9 +13,10 @@ if TYPE_CHECKING:
 def print_cluster_summary(cluster_list: List, only_labeled: bool = True):
     print("\nCluster Summary:")
     for i, cluster in enumerate(cluster_list):
-        if only_labeled and cluster.label is None:
+        if only_labeled and getattr(cluster, "label", None) is None:
             continue
-        n_l = len(getattr(cluster, "l_pts", []))
+        # ARED (old) used l_pts / o_pts; AREDIN uses l_pt_idxs (no o-pts)
+        n_l = len(getattr(cluster, "l_pts", None) or getattr(cluster, "l_pt_idxs", []))
         n_o = len(getattr(cluster, "o_pts", []))
         comp = getattr(cluster, "comp_distance", float("nan"))
         print(f"  Cluster {i}: label={cluster.label}, relevance={cluster.relevance}, "

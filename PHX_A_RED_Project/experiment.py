@@ -10,7 +10,7 @@ Encapsulates the common boilerplate that was duplicated across every main_*.py:
 - Main loop + controller hook
 - Basic progress + final reporting
 
-This keeps the core ARED (A_REDimplementation/A_RED/A_RED.py) completely untouched
+This keeps the core ARED (A_REDimplementation/A_RED/A_REDIN.py) completely untouched
 while giving callers a clean, reusable object-oriented interface.
 
 Usage (direct):
@@ -72,6 +72,36 @@ def _ensure_ared_on_path():
         sys.path.insert(0, str(alt))
 
 
+def _inject_minimal_main_stub():
+    """
+    AREDIN.py does 'from main import QS_VAR' at import time.
+    The real main.py has massive side-effect imports (torch, seaborn, all the
+    dataset processors, plotting, ...).
+
+    We inject a tiny stub 'main' module containing only the constants that
+    AREDIN actually reads at import time. This lets us use AREDIN as the
+    core without pulling the entire demo scaffolding.
+    """
+    import types
+    if "main" in sys.modules:
+        return  # already provided (real or stub)
+
+    # Reasonable defaults matching the spirit of the original AREDIN main.py
+    stub = types.ModuleType("main")
+    stub.QS_VAR = 1
+    stub.DATA_AUG_VAR = (0, ())
+    stub.K_COMP_PTS = 2
+    stub.NGHBHOOD_MERGE = False
+    stub.SINGLETON_MERGE = False
+    stub.SMART_FORGETTING_VAR = (0, 0.0)
+    stub.VERBOSE_FLAGS = [0]
+    stub.DATA_WINDOW_SIZE = 250
+    stub.SMALL_CLUSTER_THRESHOLD = 3
+    stub.GRAPH_BATCH_SIZE = 100
+
+    sys.modules["main"] = stub
+
+
 def _get_ared_class():
     """Lazy import of the untouched core ARED class."""
     global _ARED, _ARED_IMPORT_ERROR
@@ -81,14 +111,15 @@ def _get_ared_class():
         raise _ARED_IMPORT_ERROR
 
     _ensure_ared_on_path()
+    _inject_minimal_main_stub()
     try:
-        from A_RED import ARED as _ARED_CLS  # untouched
+        from A_REDIN import ARED as _ARED_CLS  # now using A_REDIN (IN variant)
         _ARED = _ARED_CLS
         return _ARED
     except Exception as e:
         _ARED_IMPORT_ERROR = ImportError(
-            "Could not import the core ARED from A_REDimplementation/A_RED. "
-            "This package expects the original untouched A_RED implementation to stay at that location. "
+            "Could not import the core ARED from A_REDimplementation/A_RED (A_REDIN). "
+            "This package expects the original untouched A_RED / A_REDIN implementation to stay at that location. "
             f"Underlying error: {e}"
         )
         raise _ARED_IMPORT_ERROR from e
@@ -118,7 +149,7 @@ class AREDExperiment:
         kappa: float = 1.5,
         data_window_size: int = 250,
         k_comparison_clusters: int = 5,
-        QS_VAR: int = 0,
+        QS_VAR: int = 1,
         REL_PROC_VAR: int = 0,
         VERBOSE_FLAGS: Optional[list] = None,
         discovery_counter: Optional[ClassDiscoveryCounter] = None,
@@ -130,15 +161,33 @@ class AREDExperiment:
         self.discovery_counter = discovery_counter or getattr(oracle, "discovery_tracker", None)
 
         ARED = _get_ared_class()  # lazy
+
+        # A_REDIN constructor:
+        # ARED(oracle, kappa, l_buf_size, K_COMP_PTS, QS_VAR, DATA_AUG_VAR, NGHBHOOD_MERGE, SINGLETON_MERGE, SMART_FORGETTING_VAR, VERBOSE_FLAGS)
+        # We map our long-standing high-level params to the IN variant:
+        #   data_window_size   -> l_buf_size
+        #   k_comparison_clusters -> K_COMP_PTS
+        # We choose conservative flags for the IN variant to keep behavior close to classic usage.
         self.ared = ARED(
-            oracle=oracle,
-            kappa=kappa,
-            data_window_size=data_window_size,
-            k_comparison_clusters=k_comparison_clusters,
-            QS_VAR=QS_VAR,
-            REL_PROC_VAR=REL_PROC_VAR,
-            VERBOSE_FLAGS=VERBOSE_FLAGS or [],
+            oracle,
+            float(kappa),
+            int(data_window_size),
+            int(k_comparison_clusters),
+            QS_VAR,
+            (0, ()),            # DATA_AUG_VAR: no augmentation
+            True,              # NGHBHOOD_MERGE
+            True,              # SINGLETON_MERGE
+            (0, 0.0),           # SMART_FORGETTING_VAR: disabled
+            VERBOSE_FLAGS or [],
         )
+
+        # Give the oracle a back-reference so it can report the authoritative
+        # query ordinal from ARED (important for AREDIN which does extra
+        # answer_query calls for internal stats even on non-queried points).
+        try:
+            oracle._ared_ref = self.ared
+        except Exception:
+            pass
 
         self.points_processed = 0
         self.start_time: Optional[float] = None
@@ -151,6 +200,34 @@ class AREDExperiment:
     @kappa.setter
     def kappa(self, value: float):
         self.ared.kappa = float(value)
+
+    # ---------------- ARED variant adapters (A_RED.py vs A_REDIN.py) ----------------
+    def _get_query_count(self) -> int:
+        """Return authoritative number of queries performed so far.
+        Works for both the old A_RED (via labeled_data) and A_REDIN (via num_queries).
+        Falls back to the oracle's count.
+        """
+        ared = self.ared
+        if hasattr(ared, "num_queries"):
+            return int(ared.num_queries)
+        ld = getattr(ared, "labeled_data", None)
+        if ld is not None and hasattr(ld, "abs_idx_array"):
+            return len(ld.abs_idx_array)
+        return int(getattr(self.oracle, "query_count", 0))
+
+    def _get_cluster_list(self):
+        """Return clusters as a list regardless of whether the core uses
+        .cluster_list (old) or .cluster_dict (AREDIN).
+        """
+        sp = self.ared.subspace_partition
+        if hasattr(sp, "cluster_dict"):
+            try:
+                return list(sp.cluster_dict.values())
+            except Exception:
+                pass
+        if hasattr(sp, "cluster_list"):
+            return sp.cluster_list
+        return []
 
     def _record_appearance(self, processed_idx: int):
         """Record every point's label for discovery / enrichment stats."""
@@ -201,8 +278,9 @@ class AREDExperiment:
 
             if verbose:
                 print("First point processed. Initial cluster created.")
-                if len(self.ared.subspace_partition.cluster_list) > 0:
-                    c0 = self.ared.subspace_partition.cluster_list[0]
+                clusters = self._get_cluster_list()
+                if len(clusters) > 0:
+                    c0 = clusters[0]
                     print(f"Initial cluster comp_distance: {getattr(c0, 'comp_distance', float('nan')):.4f}")
         except StopIteration:
             if verbose:
@@ -233,8 +311,8 @@ class AREDExperiment:
                     controller.record_and_adjust(self.ared, did_query=did_query)
 
                 if verbose and (self.points_processed % max(1, status_every) == 0 or self.points_processed == target):
-                    q = len(self.ared.labeled_data.abs_idx_array)
-                    known = len(self.ared.subspace_partition.set_of_known_labels)
+                    q = self._get_query_count()
+                    known = len(getattr(self.ared.subspace_partition, "set_of_known_labels", []))
                     rate = (q / self.points_processed * 100.0) if self.points_processed else 0.0
                     print(f"Processed {self.points_processed:,} | Queries: {q} | Known: {known} | Rate: {rate:.2f}%")
 
@@ -249,9 +327,9 @@ class AREDExperiment:
 
     def print_report(self, include_clusters: bool = False):
         elapsed = (self.end_time or time.time()) - (self.start_time or time.time())
-        final_q = len(self.ared.labeled_data.abs_idx_array)
+        final_q = self._get_query_count()
         n = self.points_processed or 1
-        known = len(self.ared.subspace_partition.set_of_known_labels)
+        known = len(getattr(self.ared.subspace_partition, "set_of_known_labels", []))
 
         print("\n" + "=" * 60)
         print("A_RED COMPLETE")
@@ -267,13 +345,13 @@ class AREDExperiment:
             self._print_discovery_report()
 
         if include_clusters:
-            print_cluster_summary(self.ared.subspace_partition.cluster_list, only_labeled=True)
+            print_cluster_summary(self._get_cluster_list(), only_labeled=True)
 
     def _print_discovery_report(self):
         """Delegate to the canonical shared implementation (matches Perch/main_perch.py style)."""
         dc = self.discovery_counter
         N = self.points_processed or 0
-        Q = len(self.ared.labeled_data.abs_idx_array)
+        Q = self._get_query_count()
         print_class_discovery_report(dc, N, Q)
 
     def get_discovery_metrics(self, rare_threshold: float = 0.01) -> dict:
@@ -290,7 +368,7 @@ class AREDExperiment:
 
         dc = self.discovery_counter
         N = self.points_processed or 0
-        Q = len(getattr(self.ared, "labeled_data", None) and self.ared.labeled_data.abs_idx_array or [])
+        Q = self._get_query_count()
         table = get_class_discovery_table(dc, N, Q)
 
         rare_rows = [r for r in table if r["prevalence"] < rare_threshold]
@@ -332,15 +410,91 @@ class AREDExperiment:
             print(f"  Median lift on discovered rare classes: {m['median_lift_rare_discovered']:.1f}x")
         print(f"  Total rare audio events that went unlabeled before discovery: {m['total_unlabeled_rare_instances']}")
 
+    def get_class_discovery_ordinals(self) -> dict:
+        """
+        Return {class_label: query_ordinal} for every class that was discovered
+        (i.e. the exact query count at the moment the oracle first returned that label).
+        This is the key data for comparing ARED vs random baseline.
+        Values are clamped to the final authoritative query count from the core.
+        """
+        dc = self.discovery_counter
+        if dc is None:
+            return {}
+        final_q = max(1, self._get_query_count())
+        out = {}
+        for lab in dc.get_labels():
+            q = dc.get_first_query_count(lab)
+            if q and q > 0:
+                out[lab] = min(q, final_q)
+        return out
+
+    def get_discovery_record(self, method: str = "ared", extra: Optional[dict] = None) -> dict:
+        """Structured record suitable for saving and later graphing.
+
+        Now includes:
+          - num_classes_in_pool : total distinct labels present in the data this run processed
+          - num_classes_found   : how many of them were actually revealed by a query
+        This lets you see if ARED "missed" any classes that were in the pool.
+        """
+        dc = self.discovery_counter
+        N = self.points_processed or 0
+        Q = self._get_query_count()
+
+        labels_cache = getattr(self.stream, "labels_cache", None) or []
+        pool_set = set(labels_cache)
+        num_in_pool = len(pool_set)
+
+        discoveries = self.get_class_discovery_ordinals()
+        num_found = len(discoveries)
+
+        missed = sorted(pool_set - set(discoveries.keys()))
+
+        rec = {
+            "method": method,
+            "frontend": None,
+            "label_column": getattr(self.stream, "label_column", None),
+            "N": N,
+            "queries": Q,
+            "seed": getattr(self.stream, "seed", None),
+            "shuffle": getattr(self.stream, "shuffle", None),
+            "discoveries": discoveries,
+            "num_classes_in_pool": num_in_pool,
+            "num_classes_found": num_found,
+            "num_classes_missed": len(missed),
+            "missed_classes": missed,
+        }
+        if extra:
+            rec.update(extra)
+        return rec
+
+    def save_discovery_record(self, out_dir: str = "results", prefix: str = "", method: str = "ared"):
+        """Save a JSON file with per-class discovery query ordinals."""
+        import json
+        from pathlib import Path as _Path
+        rec = self.get_discovery_record(method=method)
+        out_path = _Path(out_dir)
+        out_path.mkdir(parents=True, exist_ok=True)
+
+        n = rec["N"]
+        sd = rec.get("seed", "na")
+        labcol = rec.get("label_column") or "label"
+        fname = f"{prefix}{method}_{labcol}_N{n}_seed{sd}.json"
+        fpath = out_path / fname
+
+        with open(fpath, "w") as f:
+            json.dump(rec, f, indent=2)
+        print(f"[save] Wrote discovery record -> {fpath}")
+        return fpath
+
     def get_results(self) -> dict:
         """Return a compact dict of results for programmatic use."""
-        final_q = len(self.ared.labeled_data.abs_idx_array)
+        final_q = self._get_query_count()
         n = max(1, self.points_processed)
         return {
             "points_processed": self.points_processed,
             "queries": final_q,
             "query_rate": final_q / n,
-            "known_classes": len(self.ared.subspace_partition.set_of_known_labels),
+            "known_classes": len(getattr(self.ared.subspace_partition, "set_of_known_labels", [])),
             "elapsed_sec": (self.end_time or time.time()) - (self.start_time or time.time()),
             "final_kappa": self.ared.kappa,
         }
@@ -358,12 +512,18 @@ def run_ared(
     max_samples: Optional[int] = None,
     controller: Optional[ShiftingKappaController] = None,
     fast: bool = False,
+    save_results: bool = False,
+    results_dir: str = "results",
     **stream_kwargs,
 ) -> AREDExperiment:
     """
     Convenience factory + runner.
 
     frontend: "spectrogram" | "perch" | "dinov3"  OR a ready-made BaseDataStream
+
+    save_results=True will write a JSON file under results_dir containing
+    the exact query ordinal at which each class was discovered (key data
+    for ARED vs random baseline comparison graphs).
     """
     if isinstance(frontend, BaseDataStream):
         stream = frontend
@@ -417,4 +577,33 @@ def run_ared(
 
     exp.run(num_points=num_points, controller=controller, verbose=True)
     exp.print_report()
+
+    # Fill friendly info for saved records
+    if not isinstance(frontend, BaseDataStream):
+        try:
+            exp._frontend_name = frontend  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+    if save_results:
+        try:
+            extra = {}
+            if hasattr(exp, "_frontend_name") and exp._frontend_name:
+                extra["frontend"] = exp._frontend_name
+            exp.save_discovery_record(out_dir=results_dir, prefix="", method="ared")
+            # If we want frontend in the json we can patch after the fact (simple)
+            if extra:
+                import json as _json
+                from pathlib import Path as _P
+                n = exp.points_processed or 0
+                sd = getattr(exp.stream, "seed", "na")
+                labc = getattr(exp.stream, "label_column", "label")
+                candidate = _P(results_dir) / f"ared_{labc}_N{n}_seed{sd}.json"
+                if candidate.exists():
+                    data = _json.loads(candidate.read_text())
+                    data.update(extra)
+                    candidate.write_text(_json.dumps(data, indent=2))
+        except Exception as e:
+            print(f"[save] Failed to write ared discovery record: {e}")
+
     return exp
