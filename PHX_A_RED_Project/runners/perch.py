@@ -16,7 +16,7 @@ def main():
     parser.add_argument("--num-points", type=int, default=500, help="Number of points (-1 for all)")
     parser.add_argument("--label-column", type=str, default="class_name")
     parser.add_argument("--kappa", type=float, default=.5)
-    parser.add_argument("--window", type=int, default=1500)
+    parser.add_argument("--window", type=int, default=2000)
     parser.add_argument("--k-comp", type=int, default=5)
     parser.add_argument("--no-shuffle", action="store_true")
     parser.add_argument("--seed", type=int, default=420)

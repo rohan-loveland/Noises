@@ -12,7 +12,7 @@ The imports below are lazy (PEP 562 __getattr__) so that
 the "found in sys.modules after import of package" RuntimeWarning.
 """
 
-__all__ = ["run_spectrogram", "run_perch", "run_dinov3", "run_with_shifting_kappa", "run_random_baseline"]
+__all__ = ["run_spectrogram", "run_perch", "run_dinov3", "run_with_shifting_kappa", "sound_classifier", "run_random_baseline"]
 
 
 def __getattr__(name: str):
@@ -30,5 +30,8 @@ def __getattr__(name: str):
         return _m
     if name == "run_random_baseline":
         from .random_baseline import main as _m
+        return _m
+    if name == "sound_classifier":
+        from .sound_classifier import main as _m
         return _m
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

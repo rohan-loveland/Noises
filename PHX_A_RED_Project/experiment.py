@@ -153,6 +153,7 @@ class AREDExperiment:
         REL_PROC_VAR: int = 0,
         VERBOSE_FLAGS: Optional[list] = None,
         discovery_counter: Optional[ClassDiscoveryCounter] = None,
+        smart_forgetting_var: tuple = (0, 0.0),
     ):
         self.stream = data_stream
         self.oracle = oracle
@@ -167,7 +168,7 @@ class AREDExperiment:
         # We map our long-standing high-level params to the IN variant:
         #   data_window_size   -> l_buf_size
         #   k_comparison_clusters -> K_COMP_PTS
-        # We choose conservative flags for the IN variant to keep behavior close to classic usage.
+        # smart_forgetting_var forwards to AREDIN's SMART_FORGETTING_VAR (modes help retain old/rare class reps in buffer)
         self.ared = ARED(
             oracle,
             float(kappa),
@@ -177,7 +178,7 @@ class AREDExperiment:
             (0, ()),            # DATA_AUG_VAR: no augmentation
             True,              # NGHBHOOD_MERGE
             True,              # SINGLETON_MERGE
-            (0, 0.0),           # SMART_FORGETTING_VAR: disabled
+            smart_forgetting_var,   # SMART_FORGETTING_VAR (0,0.0)=disabled; see A_REDIN for modes 1-3
             VERBOSE_FLAGS or [],
         )
 
@@ -514,6 +515,7 @@ def run_ared(
     fast: bool = False,
     save_results: bool = False,
     results_dir: str = "results",
+    smart_forgetting_var: tuple = (0, 0.0),
     **stream_kwargs,
 ) -> AREDExperiment:
     """
@@ -573,6 +575,7 @@ def run_ared(
         kappa=kappa,
         data_window_size=data_window_size,
         k_comparison_clusters=k_comparison_clusters,
+        smart_forgetting_var=smart_forgetting_var,
     )
 
     exp.run(num_points=num_points, controller=controller, verbose=True)

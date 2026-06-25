@@ -16,6 +16,8 @@ All new code only. Original sources in sibling folders are left untouched.
 from .data.oracle import NoRelevanceOracle
 from .data.base_stream import BaseDataStream, SpectrogramDataStream, PerchDataStream, Dinov3DataStream
 from .experiment import AREDExperiment, run_ared
+from .classifier.ared_classifier import AREDClassifier
+from .classifier.sound_classifier import SoundClassifier
 
 __all__ = [
     "NoRelevanceOracle",
@@ -25,4 +27,6 @@ __all__ = [
     "Dinov3DataStream",
     "AREDExperiment",
     "run_ared",
+    "AREDClassifier",
+    "SoundClassifier",
 ]
