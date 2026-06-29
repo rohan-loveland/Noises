@@ -1,24 +1,33 @@
 #!/usr/bin/env python3
 """
-Benchmark script for comparing SoundClassifier vs AREDClassifier.
+Benchmark script for comparing classifiers, with strong focus on ARED.
+
+Structure of experiments:
+- Baseline (full supervision): sound_prototype, sound_logistic
+- ARED used as a classifier: ared_k{kappa}  (locates test points in the "feature space" ARED built)
+- Random selection baselines:
+    - random_Q=NNN                  (1NN on randomly chosen supports)
+    - random_Q=NNN_train_*          (train prototype/logistic on randomly chosen supports)
+- ARED selection + train:
+    - ared_select_train_k{kappa}_*  (use exactly the points ARED queried to train prototype/logistic)
+
+All use the same fixed test set. Full per-class + averaged precision/recall/f1 are saved.
 
 Usage examples:
 
-    # Run a standard comparison suite on a large subset (good default)
+    # Run a standard comparison suite
     python benchmark_classifiers.py --num-points 100000 --test-size 15000 --seed 42
 
-    # Full data (be patient)
+    # Full data
     python benchmark_classifiers.py --num-points -1 --test-size 20000 --seed 123
 
-    # Custom kappas + only ARED + random baselines
+    # Only ARED related (includes ared-as-classifier + ared-select-train + matching randoms)
     python benchmark_classifiers.py --num-points 80000 --kappas 0.25 0.35 0.5 --only-ared --seed 42
 
-    # Just display results from a previous run
-    python benchmark_classifiers.py --compare results/benchmarks/2026-06-25_14-30-00
+    # Display comparison from previous results (shows weighted+macro P/R/F1 and other avgs)
+    python benchmark_classifiers.py --compare results/benchmarks/2026-06-29_...
 
-The script saves detailed JSON files for every experiment so you can re-analyze later.
-All important values (accuracy, balanced acc, Q, seeds, anomalous fraction, classes covered, etc.)
-are captured for proper benchmarking.
+The script saves detailed JSON files (with full classification_report dict) for every experiment.
 """
 
 import argparse
@@ -164,7 +173,7 @@ def run_sound_experiment(
         "elapsed_sec": round(elapsed, 2),
         "metrics": rich_metrics,
         "extra": {
-            "classes_in_train": rich_metrics.get("classes_in_test"),  # best we have easily
+            "n_train_used": num_points,
         },
     }
     return record
@@ -186,7 +195,7 @@ def run_ared_experiment(
 
     clf = AREDClassifier(
         kappa=kappa,
-        data_window_size=3000,
+        data_window_size=10000,
         random_state=seed,
     )
     clf.fit(
@@ -353,9 +362,7 @@ def _train_and_predict_head(
             return x / n
 
         Xt = l2(X_test)
-        best_label = None
-        best_sim = -np.inf
-        # vectorized
+        # vectorized cosine
         protos = np.stack([proto[c] for c in classes])
         sims = Xt @ protos.T
         idx = np.argmax(sims, axis=1)
@@ -427,12 +434,20 @@ def print_comparison_table(records: List[Dict[str, Any]]):
     rows = []
     for r in records:
         m = r.get("metrics", {})
+        report = m.get("classification_report") or {}
+        wavg = report.get("weighted avg") or {}
+        mavg = report.get("macro avg") or {}
         rows.append({
             "name": r.get("name", "?"),
             "Q": r.get("Q", "-"),
             "acc": m.get("accuracy"),
             "bal_acc": m.get("balanced_accuracy"),
             "f1": m.get("f1_weighted"),
+            "f1_m": (mavg.get("f1-score") if mavg else None),
+            "prec_w": wavg.get("precision"),
+            "rec_w": wavg.get("recall"),
+            "prec_m": mavg.get("precision"),
+            "rec_m": mavg.get("recall"),
             "classes_test": m.get("classes_in_test_full") or m.get("classes_in_test") or m.get("n_test_filtered"),
             "anom": m.get("fraction_test_would_be_anomalous"),
             "seed": r.get("seed"),
@@ -440,37 +455,45 @@ def print_comparison_table(records: List[Dict[str, Any]]):
         })
 
     # Header
-    headers = ["Name", "Q", "Acc", "BalAcc", "F1", "ClsTest", "AnomFrac", "Seed"]
-    col_widths = [38, 8, 8, 8, 8, 8, 9, 6]
+    headers = ["Name", "Q", "Acc", "BalAcc", "F1w", "F1m", "P_w", "R_w", "P_m", "R_m", "Cls", "Anom", "Seed"]
+    col_widths = [34, 6, 6, 6, 6, 6, 5, 5, 5, 5, 5, 5, 6]
 
     def fmt_row(vals):
         return " | ".join(str(v).ljust(w) for v, w in zip(vals, col_widths))
 
-    print("\n" + "=" * 100)
+    print("\n" + "=" * 105)
     print("BENCHMARK COMPARISON")
-    print("=" * 100)
+    print("=" * 105)
     print(fmt_row(headers))
-    print("-" * 100)
+    print("-" * 105)
 
     for row in rows:
         vals = [
-            row["name"][:37],
+            row["name"][:33],
             str(row["Q"]),
             f"{row['acc']:.4f}" if row["acc"] is not None else "-",
             f"{row['bal_acc']:.4f}" if row["bal_acc"] is not None else "-",
             f"{row['f1']:.4f}" if row["f1"] is not None else "-",
+            f"{row['f1_m']:.4f}" if row["f1_m"] is not None else "-",
+            f"{row['prec_w']:.3f}" if row["prec_w"] is not None else "-",
+            f"{row['rec_w']:.3f}" if row["rec_w"] is not None else "-",
+            f"{row['prec_m']:.3f}" if row["prec_m"] is not None else "-",
+            f"{row['rec_m']:.3f}" if row["rec_m"] is not None else "-",
             str(row["classes_test"]) if row["classes_test"] else "-",
             f"{row['anom']:.3f}" if row["anom"] is not None else "-",
             str(row["seed"]),
         ]
         print(fmt_row(vals))
 
-    print("=" * 100)
+    print("=" * 105)
     print("Notes:")
     print("  - Q = number of labels used (prototypes for ARED, 'full' for supervised)")
-    print("  - AnomFrac = fraction of test points outside ARED's learned cluster regions")
-    print("  - All methods evaluated on the same fixed test set within one benchmark run")
-    print("=" * 100 + "\n")
+    print("  - F1w = weighted F1; F1m = macro F1   |   P_w/R_w = weighted avg Prec/Rec ; P_m/R_m = macro avg Prec/Rec")
+    print("  - Cls = # classes in the (fixed) test set for this run")
+    print("  - Anom = fraction of test points outside ARED's learned cluster regions (ared_* rows only)")
+    print("  - All methods use the exact same fixed test set within one benchmark run.")
+    print("  - Full per-class + all averages (prec/rec/f1/support) are in the JSONs: metrics.classification_report")
+    print("=" * 105 + "\n")
 
 
 def run_full_suite(args):
@@ -513,7 +536,7 @@ def run_full_suite(args):
     # === ARED runs + random baselines ===
     kappas = args.kappas
     if not kappas:
-        kappas = [0.25]
+        kappas = [0.25, 0.35, 0.50]
 
     for kappa in kappas:
         name = f"ared_k{kappa}"
