@@ -200,12 +200,12 @@ class SoundClassifier:
         # === Model construction ===
         mt = self.model_type
 
-        if mt == "prototype":
+        if mt == "prototype": # First test 71.65% accuracy on test
             # Class prototype classifier (mean embedding + cosine). Excellent for fixed high-quality embeddings.
             print("Using prototype (mean-per-class + cosine) classifier")
             self._fit_prototypes(X_train, y_train)
             # self.model now holds the prototype matrix
-        elif mt == "logistic":
+        elif mt == "logistic": # overall accuracy 75.8%
             from sklearn.linear_model import LogisticRegression
             print("Using LogisticRegression (balanced)")
             self.model = LogisticRegression(
@@ -217,7 +217,7 @@ class SoundClassifier:
                 n_jobs=-1,
             )
             self.model.fit(X_train, y_encoded)
-        elif mt == "lightgbm" and LIGHTGBM_AVAILABLE:
+        elif mt == "lightgbm" and LIGHTGBM_AVAILABLE: #overall 70.61 
             params = {
                 'n_estimators': self.n_estimators,
                 'random_state': self.random_state,
@@ -233,7 +233,7 @@ class SoundClassifier:
                 print("→ GPU enabled")
             self.model = lgb.LGBMClassifier(**params)
             self.model.fit(X_train, y_encoded)
-        else:
+        else: # 47.27%
             # Fallback / explicit randomforest
             from sklearn.ensemble import RandomForestClassifier
             self.model = RandomForestClassifier(
